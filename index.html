@@ -198,6 +198,7 @@ label{display:block;font-size:.72rem;font-weight:700;text-transform:uppercase;le
 
 <nav aria-label="Sezioni">
   <button data-tab="spesa" class="attiva"><span class="ic">🧾</span>Spesa</button>
+  <button data-tab="lista"><span class="ic">☑️</span>Lista</button>
   <button data-tab="catalogo"><span class="ic">🗂</span>Catalogo</button>
   <button data-tab="confronta"><span class="ic">⚖️</span>Confronta</button>
   <button data-tab="altro"><span class="ic">⋯</span>Altro</button>
@@ -208,7 +209,7 @@ label{display:block;font-size:.72rem;font-weight:700;text-transform:uppercase;le
 <script>
 "use strict";
 /* ================= DB (IndexedDB) ================= */
-const DB_NOME = "spesa-db", DB_VER = 1;
+const DB_NOME = "spesa-db", DB_VER = 2;
 let db;
 function apriDB(){
   return new Promise((res, rej) => {
@@ -220,6 +221,8 @@ function apriDB(){
         const s = d.createObjectStore("acquisti",{keyPath:"id"});
         s.createIndex("perProdotto","productId",{unique:false});
       }
+      if(!d.objectStoreNames.contains("scontrini")) d.createObjectStore("scontrini",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("meta")) d.createObjectStore("meta",{keyPath:"k"});
     };
     rq.onsuccess = e => { db = e.target.result; res(); };
     rq.onerror = () => rej(rq.error);
@@ -245,11 +248,22 @@ const salvaProdotto = p => tx("prodotti","readwrite", s => s.put(p));
 const eliminaProdotto = id => tx("prodotti","readwrite", s => s.delete(id));
 const salvaAcquisto = a => tx("acquisti","readwrite", s => s.put(a));
 const eliminaAcquisto = id => tx("acquisti","readwrite", s => s.delete(id));
+const salvaScontrino = r => tx("scontrini","readwrite", s => s.put(r));
+const eliminaScontrino = id => tx("scontrini","readwrite", s => s.delete(id));
+const metaSet = (k, v) => tx("meta","readwrite", s => s.put({k, v}));
+const metaDel = k => tx("meta","readwrite", s => s.delete(k));
+function metaGet(k){
+  return new Promise((res, rej) => {
+    const rq = db.transaction("meta").objectStore("meta").get(k);
+    rq.onsuccess = () => res(rq.result ? rq.result.v : null);
+    rq.onerror = () => rej(rq.error);
+  });
+}
 
 /* ================= stato in memoria ================= */
-let PRODOTTI = [], ACQUISTI = [];
+let PRODOTTI = [], ACQUISTI = [], SCONTRINI = [];
 async function ricarica(){
-  [PRODOTTI, ACQUISTI] = await Promise.all([tutti("prodotti"), tutti("acquisti")]);
+  [PRODOTTI, ACQUISTI, SCONTRINI] = await Promise.all([tutti("prodotti"), tutti("acquisti"), tutti("scontrini")]);
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 
@@ -280,6 +294,12 @@ function fmtFormato(f){
 }
 function ultimoAcquisto(pid){
   const a = ACQUISTI.filter(x => x.productId===pid);
+  if(!a.length) return null;
+  a.sort((x,y) => y.date.localeCompare(x.date) || (y.createdAt||0)-(x.createdAt||0));
+  return a[0];
+}
+function ultimoPrezzoPieno(pid){
+  const a = ACQUISTI.filter(x => x.productId===pid && !x.offer);
   if(!a.length) return null;
   a.sort((x,y) => y.date.localeCompare(x.date) || (y.createdAt||0)-(x.createdAt||0));
   return a[0];
@@ -380,6 +400,19 @@ async function modaleScanner(onEan){
 }
 function gestisciEan(ean){
   const corrisp = prodottiPerEan(ean);
+  if(SESSIONE){
+    const qui = corrisp.filter(p => p.market===SESSIONE.receipt.market);
+    if(qui.length) return aggiungiASessione(qui[0].id);
+    if(corrisp.length){
+      // ce l'hai ma in un altro supermercato: clona la scheda per questo
+      const orig = corrisp[0];
+      return modaleNuovoProdotto(orig.name, {
+        ean, qty: orig.format.qty, unit: orig.format.unit,
+        gruppo: orig.group, market: SESSIONE.receipt.market
+      });
+    }
+    return cercaOFF(ean);
+  }
   if(corrisp.length === 1) return modalePrezzo(corrisp[0].id);
   if(corrisp.length > 1) return modaleScelteEan(corrisp);
   cercaOFF(ean);
@@ -432,6 +465,126 @@ async function cercaOFF(ean){
   modaleNuovoProdotto(prefill.nome || "", prefill);
 }
 
+/* ================= sessione scontrino ================= */
+let SESSIONE = null; // {receipt:{id,market,date}, righe:[{productId, qta}]}
+async function salvaBozza(){ if(SESSIONE) await metaSet("sessioneBozza", SESSIONE); }
+async function caricaBozza(){ SESSIONE = await metaGet("sessioneBozza"); }
+async function chiudiBozza(){ SESSIONE = null; await metaDel("sessioneBozza"); }
+
+function aggiungiASessione(pid){
+  const r = SESSIONE.righe.find(x => x.productId===pid);
+  if(r){ r.qta++; toast("Già in lista: quantità +1"); }
+  else{
+    SESSIONE.righe.push({productId: pid, qta: 1});
+    const p = PRODOTTI.find(x => x.id===pid);
+    toast("Aggiunto: " + (p?p.name:""));
+  }
+  salvaBozza();
+  render();
+}
+
+function modaleNuovaSessione(){
+  const velo = apriModale(`
+    <h3>Nuovo scontrino</h3>
+    <p class="nota" style="margin-top:2px">Scansiona i prodotti man mano, poi inserisci i prezzi tutti in fila con lo scontrino in mano.</p>
+    <label for="ns-market">Supermercato</label>
+    <input id="ns-market" list="dl-mercati" placeholder="es. Lidl">
+    ${datalistMercati()}
+    <label for="ns-data">Data</label>
+    <input id="ns-data" type="date" value="${oggi()}">
+    <button class="btn" id="ns-via">Inizia sessione</button>`);
+  velo.querySelector("#ns-via").addEventListener("click", async () => {
+    const market = velo.querySelector("#ns-market").value.trim();
+    if(!market) return toast("Serve il supermercato");
+    SESSIONE = {receipt:{id: uid(), market, date: velo.querySelector("#ns-data").value || oggi()}, righe:[]};
+    await salvaBozza();
+    chiudiModale();
+    render();
+  });
+  velo.querySelector("#ns-market").focus();
+}
+
+function vistaSessione(){
+  const s = SESSIONE;
+  const righe = s.righe.map(r => ({r, p: PRODOTTI.find(x => x.id===r.productId)})).filter(x => x.p);
+  vista.innerHTML = `
+    <h2>Scontrino in corso — ${esc(s.receipt.market)} · ${fmtData(s.receipt.date)}</h2>
+    <button class="btn" id="ss-scan" style="margin-top:0">📷 Scansiona prodotto</button>
+    <input id="ss-cerca" type="search" placeholder="…o aggiungi cercando (banco, sfuso)" autocomplete="off" style="margin-top:8px">
+    <div id="ss-risultati" class="card" style="margin-top:8px;display:none"></div>
+    <h2>Prodotti (${righe.length})</h2>
+    <div class="card" id="ss-lista">${
+      righe.length ? righe.map(({r,p}) => `
+        <div class="prod" style="cursor:default">
+          <div class="info">
+            <div class="nome">${esc(p.name)}</div>
+            <div class="meta"><span>${fmtFormato(p.format)}</span>${p.market!==s.receipt.market?`<span style="color:var(--rosso)">scheda di ${esc(p.market)}</span>`:""}</div>
+          </div>
+          ${p.format.mode!=="peso"?`<span class="prezzo-mono" style="display:flex;align-items:center;gap:6px">
+            <button class="chip" data-meno="${p.id}">−</button>×${r.qta}<button class="chip" data-piu="${p.id}">+</button>
+          </span>`:""}
+          <span class="chip" data-togli="${p.id}" style="color:var(--rosso)">✕</span>
+        </div>`).join("")
+      : `<div class="vuoto" style="padding:16px">Ancora nessun prodotto: scansiona o cerca.</div>`
+    }</div>
+    <button class="btn" id="ss-prezzi" ${righe.length?"":"disabled"}>Inserisci i prezzi (${righe.length})</button>
+    <button class="btn pericolo" id="ss-annulla">Annulla sessione</button>`;
+  $("#ss-scan").addEventListener("click", () => modaleScanner());
+  const cerca = $("#ss-cerca"), ris = $("#ss-risultati");
+  cerca.addEventListener("input", () => {
+    const trovati = cercaProdotti(cerca.value).filter(p => p.market===s.receipt.market);
+    if(!cerca.value.trim()){ ris.style.display="none"; return; }
+    ris.style.display = "block";
+    ris.innerHTML = trovati.length ? trovati.map(p => `
+      <div class="prod" data-id="${p.id}">
+        <div class="info"><div class="nome">${esc(p.name)}</div>
+        <div class="meta"><span>${fmtFormato(p.format)}</span></div></div>
+      </div>`).join("")
+      : `<div class="vuoto" style="padding:14px">Niente in catalogo per «${esc(cerca.value)}» a ${esc(s.receipt.market)}.<br>Scansiona per crearlo, o crealo dal Catalogo.</div>`;
+    ris.querySelectorAll(".prod").forEach(el =>
+      el.addEventListener("click", () => { cerca.value=""; ris.style.display="none"; aggiungiASessione(el.dataset.id); }));
+  });
+  vista.querySelectorAll("[data-piu]").forEach(b => b.addEventListener("click", () => {
+    SESSIONE.righe.find(r => r.productId===b.dataset.piu).qta++; salvaBozza(); render();
+  }));
+  vista.querySelectorAll("[data-meno]").forEach(b => b.addEventListener("click", () => {
+    const r = SESSIONE.righe.find(x => x.productId===b.dataset.meno);
+    r.qta = Math.max(1, r.qta-1); salvaBozza(); render();
+  }));
+  vista.querySelectorAll("[data-togli]").forEach(b => b.addEventListener("click", () => {
+    SESSIONE.righe = SESSIONE.righe.filter(r => r.productId!==b.dataset.togli); salvaBozza(); render();
+  }));
+  $("#ss-prezzi").addEventListener("click", () => flussoPrezzi(0));
+  $("#ss-annulla").addEventListener("click", async () => {
+    if(!confirm("Annullare la sessione? I prodotti scansionati (non i prezzi già salvati) verranno scartati.")) return;
+    await chiudiBozza();
+    render();
+  });
+}
+
+async function flussoPrezzi(indice){
+  const s = SESSIONE;
+  if(indice >= s.righe.length){ // fine: registra scontrino e chiudi
+    await salvaScontrino({id: s.receipt.id, market: s.receipt.market, date: s.receipt.date, createdAt: Date.now()});
+    const n = ACQUISTI.filter(a => a.receiptId===s.receipt.id);
+    const tot = n.reduce((t,a) => t + a.price*(a.qty||1), 0);
+    await chiudiBozza();
+    await ricarica();
+    toast(`Scontrino salvato: ${n.length} prezzi, ${fmtEuro(tot)}`);
+    render();
+    return;
+  }
+  const riga = s.righe[indice];
+  modalePrezzo(riga.productId, {
+    receiptId: s.receipt.id,
+    data: s.receipt.date,
+    qta: riga.qta,
+    progresso: `Prodotto ${indice+1} di ${s.righe.length}`,
+    onSalvato: () => flussoPrezzi(indice+1),
+    onSalta: () => flussoPrezzi(indice+1)
+  });
+}
+
 /* ================= util UI ================= */
 const $ = sel => document.querySelector(sel);
 const vista = $("#vista");
@@ -473,16 +626,19 @@ function datalistGruppi(){
 
 /* ================= TAB: Spesa (inserimento rapido) ================= */
 function vistaSpesa(){
+  if(SESSIONE) return vistaSessione();
   vista.innerHTML = `
     <h2>Inserimento rapido</h2>
-    <button class="btn" id="btn-scan" style="margin-top:0">📷 Scansiona codice a barre</button>
+    <button class="btn" id="btn-sessione" style="margin-top:0">🧾 Nuovo scontrino (sessione)</button>
+    <button class="btn secondario" id="btn-scan">📷 Scansione singola</button>
     <div style="text-align:center;color:var(--termico);font-size:.75rem;margin:10px 0 8px">— oppure cerca a mano —</div>
     <input id="cerca" type="search" placeholder="Cerca prodotto… (es. prosciutto)" autocomplete="off">
     <div id="risultati" class="card" style="margin-top:10px;display:none"></div>
     <div id="suggerimento-nuovo"></div>
     <button class="btn secondario" id="btn-nuovo">+ Nuovo prodotto</button>
-    <p class="nota">Scansiona il codice a barre: se il prodotto è in catalogo vai dritto al prezzo, se è nuovo la scheda si precompila da OpenFoodFacts. Il prezzo al kg lo calcolo io dal formato.</p>`;
-  $("#btn-scan").addEventListener("click", modaleScanner);
+    <p class="nota">Sessione scontrino: scansiona tutti i prodotti della spesa, poi inserisci i prezzi in fila. Supermercato e data li imposti una volta sola.</p>`;
+  $("#btn-sessione").addEventListener("click", modaleNuovaSessione);
+  $("#btn-scan").addEventListener("click", () => modaleScanner());
   const cerca = $("#cerca"), ris = $("#risultati");
   cerca.addEventListener("input", () => {
     const q = cerca.value;
@@ -510,21 +666,30 @@ function vistaSpesa(){
   cerca.focus();
 }
 
-function modalePrezzo(pid){
+function modalePrezzo(pid, opts={}){
   const p = PRODOTTI.find(x => x.id===pid);
   if(!p) return;
   const peso = p.format.mode==="peso";
+  const inSessione = !!opts.receiptId;
   const velo = apriModale(`
+    ${opts.progresso?`<div class="nota" style="margin:0 0 4px">${esc(opts.progresso)}</div>`:""}
     <h3>${esc(p.name)}</h3>
     <div class="meta" style="font-size:.8rem;color:var(--termico)">${esc(p.market)} · ${fmtFormato(p.format)}</div>
-    <label for="mp-prezzo">Prezzo pagato (€)</label>
+    <label for="mp-prezzo">Prezzo ${peso?"pagato":"a confezione"} (€)</label>
     <input id="mp-prezzo" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
     ${peso?`<label for="mp-peso">Peso (g)</label>
-    <input id="mp-peso" type="number" inputmode="decimal" step="1" min="0" placeholder="es. 380">`:""}
-    <label for="mp-data">Data</label>
-    <input id="mp-data" type="date" value="${oggi()}">
+    <input id="mp-peso" type="number" inputmode="decimal" step="1" min="0" placeholder="es. 380">`
+    :`<label for="mp-qta">N. confezioni</label>
+    <input id="mp-qta" type="number" inputmode="numeric" step="1" min="1" value="${opts.qta||1}">`}
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:.9rem;font-weight:600;color:var(--inchiostro)">
+      <input type="checkbox" id="mp-offerta" style="width:auto"> In offerta / promo
+    </label>
+    <div class="nota" style="margin-top:2px">I prezzi in offerta restano nello storico ma non falsano il confronto tra supermercati.</div>
+    ${inSessione?"":`<label for="mp-data">Data</label>
+    <input id="mp-data" type="date" value="${oggi()}">`}
     <div id="mp-anteprima" class="nota"></div>
-    <button class="btn" id="mp-salva">Salva prezzo</button>`);
+    <button class="btn" id="mp-salva">${inSessione?"Salva e avanti":"Salva prezzo"}</button>
+    ${inSessione?`<button class="btn secondario" id="mp-salta">Salta questo prodotto</button>`:""}`);
   const iP = velo.querySelector("#mp-prezzo"), iW = velo.querySelector("#mp-peso"),
         ant = velo.querySelector("#mp-anteprima");
   function anteprima(){
@@ -536,25 +701,30 @@ function modalePrezzo(pid){
   }
   iP.addEventListener("input", anteprima);
   if(iW) iW.addEventListener("input", anteprima);
+  if(opts.onSalta) velo.querySelector("#mp-salta").addEventListener("click", () => { chiudiModale(); opts.onSalta(); });
   velo.querySelector("#mp-salva").addEventListener("click", async () => {
     const prezzo = parseFloat(iP.value.replace(",","."));
     if(!prezzo || prezzo<=0) return toast("Inserisci un prezzo valido");
-    let pesoKg = null;
+    let pesoKg = null, qta = 1;
     if(peso){
       pesoKg = parseFloat((iW.value||"").replace(",","."))/1000;
       if(!pesoKg || pesoKg<=0) return toast("Inserisci il peso");
+    }else{
+      qta = Math.max(1, parseInt(velo.querySelector("#mp-qta").value,10) || 1);
     }
     const u = prezzoUnitario(p, prezzo, pesoKg);
     await salvaAcquisto({
-      id: uid(), productId: p.id, price: prezzo,
+      id: uid(), productId: p.id, price: prezzo, qty: qta,
       weightKg: pesoKg, unitPrice: u.v, unitLabel: u.label,
-      date: velo.querySelector("#mp-data").value || oggi(),
+      offer: velo.querySelector("#mp-offerta").checked,
+      receiptId: opts.receiptId || null,
+      date: inSessione ? opts.data : (velo.querySelector("#mp-data").value || oggi()),
       createdAt: Date.now()
     });
     await ricarica();
     chiudiModale();
     toast("Salvato: " + fmtUnit(u.v, u.label));
-    render();
+    if(opts.onSalvato) opts.onSalvato(); else render();
   });
   iP.focus();
 }
@@ -566,11 +736,11 @@ function modaleNuovoProdotto(nomeIniziale="", prefill={}){
     <label for="np-nome">Nome (come lo riconosci tu)</label>
     <input id="np-nome" placeholder="es. Prosciutto crudo vaschetta" value="${esc(nomeIniziale)}">
     <label for="np-gruppo">Gruppo di confronto</label>
-    <input id="np-gruppo" list="dl-gruppi" placeholder="es. Prosciutto crudo">
+    <input id="np-gruppo" list="dl-gruppi" placeholder="es. Prosciutto crudo" value="${esc(prefill.gruppo||"")}">
     ${datalistGruppi()}
     <div class="nota" style="margin-top:4px">Prodotti con lo stesso gruppo vengono confrontati tra supermercati.</div>
     <label for="np-market">Supermercato</label>
-    <input id="np-market" list="dl-mercati" placeholder="es. Lidl">
+    <input id="np-market" list="dl-mercati" placeholder="es. Lidl" value="${esc(prefill.market || (SESSIONE?SESSIONE.receipt.market:""))}">
     ${datalistMercati()}
     <label>Formato</label>
     <div class="riga">
@@ -622,7 +792,8 @@ function modaleNuovoProdotto(nomeIniziale="", prefill={}){
     await ricarica();
     chiudiModale();
     toast("Scheda creata");
-    modalePrezzo(p.id); // subito il primo prezzo
+    if(SESSIONE && p.market===SESSIONE.receipt.market) aggiungiASessione(p.id);
+    else modalePrezzo(p.id); // subito il primo prezzo
   });
   velo.querySelector("#np-nome").focus();
 }
@@ -683,7 +854,7 @@ function modaleDettaglio(pid){
       acquisti.length ? acquisti.map(a => `
         <div class="r" data-aid="${a.id}">
           <span class="d">${fmtData(a.date)}</span>
-          <span>${fmtEuro(a.price)}${a.weightKg?` · ${(a.weightKg*1000).toFixed(0)} g`:""}</span>
+          <span>${fmtEuro(a.price)}${(a.qty||1)>1?` ×${a.qty}`:""}${a.weightKg?` · ${(a.weightKg*1000).toFixed(0)} g`:""}${a.offer?` <span style="color:var(--verde);font-weight:700">PROMO</span>`:""}</span>
           <span><strong>${fmtUnit(a.unitPrice, a.unitLabel)}</strong></span>
           <span class="d" style="cursor:pointer" data-del="${a.id}" title="Elimina">✕</span>
         </div>`).join("")
@@ -797,7 +968,11 @@ function vistaConfronta(){
     const nf = normalizza(filtro);
     const visibili = nomi.filter(n => !nf || normalizza(n).includes(nf));
     box.innerHTML = visibili.map(nome => {
-      const righe = gruppi[nome].map(p => ({p, u: ultimoAcquisto(p.id)}));
+      const righe = gruppi[nome].map(p => {
+        const pieno = ultimoPrezzoPieno(p.id);
+        const ult = ultimoAcquisto(p.id);
+        return {p, u: pieno, offerta: (ult && ult.offer && (!pieno || ult.date > pieno.date)) ? ult : null};
+      });
       // miglior prezzo solo tra unità confrontabili
       const perUnita = {};
       righe.forEach(r => { if(r.u) (perUnita[r.u.unitLabel] = perUnita[r.u.unitLabel] || []).push(r); });
@@ -812,16 +987,17 @@ function vistaConfronta(){
       const misto = labels.length > 1;
       return `<div class="card gruppo">
         <div class="titolo"><span>${esc(nome)}</span><span class="n">${righe.length} ${righe.length===1?"scheda":"schede"}</span></div>
-        <div class="griglia-conf">${righe.map(({p,u}) => `
+        <div class="griglia-conf">${righe.map(({p,u,offerta}) => `
           <div class="prod">
             <div class="info">
               <div class="nome">${esc(p.market)}</div>
               <div class="meta"><span>${esc(p.name)}</span><span>${fmtFormato(p.format)}</span>${stelleHTML(p.rating,true)}</div>
+              ${offerta?`<div class="meta" style="margin-top:2px"><span style="color:var(--verde);font-weight:700">in offerta: <span class="prezzo-mono">${fmtUnit(offerta.unitPrice, offerta.unitLabel)}</span> il ${fmtData(offerta.date)}</span></div>`:""}
             </div>
             ${u?`<div class="cartellino ${migliori.has(p.id)?"migliore":""}">
               <span class="u">${fmtData(u.date)} · €/${u.unitLabel}</span>
               <span class="v">${u.unitPrice.toFixed(2).replace(".",",")}</span>
-            </div>`:`<span class="badge-nuovo" style="background:var(--termico)">SENZA PREZZO</span>`}
+            </div>`:`<span class="badge-nuovo" style="background:var(--termico)">${offerta?"SOLO OFFERTE":"SENZA PREZZO"}</span>`}
           </div>`).join("")}
         </div>
         ${misto?`<p class="nota">⚠ Unità diverse nel gruppo (${labels.join(", ")}): il confronto vale solo a parità di unità.</p>`:""}
@@ -835,14 +1011,60 @@ function vistaConfronta(){
 /* ================= TAB: Altro ================= */
 function vistaAltro(){
   const mercati = new Set(PRODOTTI.map(p => p.market));
+  // ---- statistiche mensili (ultimi 6 mesi, solo acquisti con scontrino o data) ----
+  const perMese = {};
+  for(const a of ACQUISTI){
+    const mese = a.date.slice(0,7);
+    const sp = a.price * (a.qty||1);
+    perMese[mese] = perMese[mese] || {tot:0, mercati:{}};
+    perMese[mese].tot += sp;
+    const m = (SCONTRINI.find(s => s.id===a.receiptId)||{}).market
+      || (PRODOTTI.find(p => p.id===a.productId)||{}).market || "?";
+    perMese[mese].mercati[m] = (perMese[mese].mercati[m]||0) + sp;
+  }
+  const mesi = Object.keys(perMese).sort().reverse().slice(0,6);
+  // ---- paniere personale: variazione % primo→ultimo prezzo pieno (span >= 60 giorni) ----
+  const variazioni = [];
+  for(const p of PRODOTTI){
+    const pieni = ACQUISTI.filter(a => a.productId===p.id && !a.offer)
+      .sort((x,y) => x.date.localeCompare(y.date));
+    if(pieni.length < 2) continue;
+    const primo = pieni[0], ultimo = pieni[pieni.length-1];
+    const giorni = (new Date(ultimo.date) - new Date(primo.date)) / 86400000;
+    if(giorni < 60 || primo.unitLabel!==ultimo.unitLabel) continue;
+    variazioni.push({p, pct: (ultimo.unitPrice - primo.unitPrice) / primo.unitPrice * 100, giorni});
+  }
+  variazioni.sort((a,b) => b.pct - a.pct);
+  const mediana = variazioni.length
+    ? variazioni.map(v => v.pct).sort((a,b) => a-b)[Math.floor(variazioni.length/2)]
+    : null;
+
   vista.innerHTML = `
     <h2>I tuoi dati</h2>
     <div class="card">
       <div class="storico">
         <div class="r"><span class="d">Prodotti</span><span><strong>${PRODOTTI.length}</strong></span></div>
         <div class="r"><span class="d">Prezzi registrati</span><span><strong>${ACQUISTI.length}</strong></span></div>
+        <div class="r"><span class="d">Scontrini</span><span><strong>${SCONTRINI.length}</strong></span></div>
         <div class="r"><span class="d">Supermercati</span><span><strong>${mercati.size}</strong></span></div>
       </div>
+    </div>
+    <h2>Spesa per mese</h2>
+    <div class="card">
+      ${mesi.length ? `<div class="storico">${mesi.map(m => `
+        <div class="r"><span class="d">${m.slice(5)}/${m.slice(2,4)}</span>
+        <span style="font-size:.75rem;color:var(--termico)">${Object.entries(perMese[m].mercati).sort((a,b)=>b[1]-a[1]).map(([k,v]) => esc(k)+" "+fmtEuro(v)).join(" · ")}</span>
+        <span><strong>${fmtEuro(perMese[m].tot)}</strong></span></div>`).join("")}</div>
+      <p class="nota">Totale di ciò che <em>registri</em>, non necessariamente di tutto ciò che spendi.</p>`
+      : `<p class="nota" style="margin:0">Ancora nessun dato: arriverà con i primi scontrini.</p>`}
+    </div>
+    <h2>Paniere personale</h2>
+    <div class="card">
+      ${mediana!==null ? `
+        <p style="font-size:1.05rem;font-weight:800" class="prezzo-mono">${mediana>=0?"+":""}${mediana.toFixed(1)}%</p>
+        <p class="nota" style="margin-top:2px">Variazione mediana del €/unità dei tuoi prodotti abituali (primo → ultimo prezzo pieno, su ${variazioni.length} prodotti con almeno 60 giorni di storico).</p>
+        ${variazioni.slice(0,3).filter(v => v.pct>0).length?`<p class="nota"><strong>Rincari maggiori:</strong> ${variazioni.slice(0,3).filter(v => v.pct>0).map(v => esc(v.p.name)+" ("+esc(v.p.market)+") "+(v.pct>=0?"+":"")+v.pct.toFixed(0)+"%").join(" · ")}</p>`:""}`
+      : `<p class="nota" style="margin:0">Servono più dati: almeno 2 prezzi pieni dello stesso prodotto a 60+ giorni di distanza. Continua a registrare, il paniere si costruisce da solo.</p>`}
     </div>
     <h2>Backup</h2>
     <div class="card">
@@ -851,9 +1073,9 @@ function vistaAltro(){
       <button class="btn secondario" id="al-importa">Importa backup</button>
       <input id="al-file" type="file" accept="application/json,.json" hidden>
     </div>
-    <p class="nota" style="text-align:center">Spesa v1 · funziona offline · i dati non lasciano mai il dispositivo</p>`;
+    <p class="nota" style="text-align:center">Spesa v3 · funziona offline · i dati non lasciano mai il dispositivo</p>`;
   $("#al-esporta").addEventListener("click", () => {
-    const blob = new Blob([JSON.stringify({v:1, esportato: new Date().toISOString(), prodotti: PRODOTTI, acquisti: ACQUISTI}, null, 1)], {type:"application/json"});
+    const blob = new Blob([JSON.stringify({v:3, esportato: new Date().toISOString(), prodotti: PRODOTTI, acquisti: ACQUISTI, scontrini: SCONTRINI}, null, 1)], {type:"application/json"});
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "spesa-backup-" + oggi() + ".json";
@@ -872,9 +1094,11 @@ function vistaAltro(){
         if(!confirm("Sicuro? Il catalogo attuale su questo dispositivo verrà cancellato.")) return;
         for(const p of PRODOTTI) await eliminaProdotto(p.id);
         for(const a of ACQUISTI) await eliminaAcquisto(a.id);
+        for(const s of SCONTRINI) await eliminaScontrino(s.id);
       }
       for(const p of dati.prodotti) await salvaProdotto(p);
       for(const a of dati.acquisti) await salvaAcquisto(a);
+      for(const s of (dati.scontrini||[])) await salvaScontrino(s);
       await ricarica();
       toast(`Importati ${dati.prodotti.length} prodotti, ${dati.acquisti.length} prezzi`);
       render();
@@ -885,12 +1109,113 @@ function vistaAltro(){
   });
 }
 
+/* ================= TAB: Lista (spesa intelligente) ================= */
+let LISTA = []; // [{group, done}]
+async function caricaLista(){ LISTA = (await metaGet("lista")) || []; }
+async function salvaLista(){ await metaSet("lista", LISTA); }
+
+function consiglioPerGruppo(group){
+  // candidati: prodotti del gruppo con almeno un prezzo pieno
+  const cand = PRODOTTI.filter(p => (p.group||p.name)===group)
+    .map(p => ({p, u: ultimoPrezzoPieno(p.id)}))
+    .filter(x => x.u);
+  if(!cand.length) return null;
+  // confronto solo a parità di unità: usa l'unità più frequente nel gruppo
+  const conta = {};
+  cand.forEach(c => conta[c.u.unitLabel] = (conta[c.u.unitLabel]||0)+1);
+  const unita = Object.keys(conta).sort((a,b) => conta[b]-conta[a])[0];
+  const stessi = cand.filter(c => c.u.unitLabel===unita);
+  // regola: il più economico tra quelli con gradimento entro 1 stella dal massimo del gruppo
+  const maxStelle = Math.max(...stessi.map(c => c.p.rating||0));
+  const ammessi = maxStelle>0 ? stessi.filter(c => (c.p.rating||0) >= maxStelle-1) : stessi;
+  ammessi.sort((a,b) => a.u.unitPrice - b.u.unitPrice);
+  const scelto = ammessi[0];
+  stessi.sort((a,b) => a.u.unitPrice - b.u.unitPrice);
+  const piuEconomico = stessi[0];
+  return {scelto, alternativa: piuEconomico.p.id!==scelto.p.id ? piuEconomico : null};
+}
+
+function vistaLista(){
+  const gruppiDisponibili = [...new Set(PRODOTTI.map(p => p.group||p.name))].sort();
+  vista.innerHTML = `
+    <h2>Lista della spesa</h2>
+    <div class="riga">
+      <input id="ls-nuovo" list="dl-gruppi-lista" placeholder="Aggiungi… (es. Prosciutto crudo)" autocomplete="off">
+      <button class="btn" id="ls-aggiungi" style="margin-top:0;flex:0 0 auto;width:auto">+</button>
+    </div>
+    <datalist id="dl-gruppi-lista">${gruppiDisponibili.map(g => `<option value="${esc(g)}">`).join("")}</datalist>
+    <div id="ls-corpo" style="margin-top:12px"></div>
+    <p class="nota">Consiglio: il più economico tra i prodotti con gradimento entro 1 stella dal migliore del gruppo — così il prezzo non ti manda a comprare cose che non ti piacciono. Prezzo e stelle restano visibili: l'ultima parola è tua.</p>`;
+  function aggiungi(){
+    const g = $("#ls-nuovo").value.trim();
+    if(!g) return;
+    if(LISTA.some(x => x.group.toLowerCase()===g.toLowerCase())) return toast("Già in lista");
+    LISTA.push({group: g, done: false});
+    salvaLista();
+    $("#ls-nuovo").value = "";
+    disegna();
+  }
+  $("#ls-aggiungi").addEventListener("click", aggiungi);
+  $("#ls-nuovo").addEventListener("keydown", e => { if(e.key==="Enter") aggiungi(); });
+
+  function disegna(){
+    const corpo = $("#ls-corpo");
+    if(!LISTA.length){
+      corpo.innerHTML = `<div class="vuoto">Lista vuota.<br>Aggiungi i gruppi che ti servono: ti dico <strong>dove conviene</strong> comprarli.</div>`;
+      return;
+    }
+    // raggruppa per supermercato consigliato
+    const perMercato = {};
+    const senzaDati = [];
+    for(const item of LISTA){
+      const c = consiglioPerGruppo(item.group);
+      if(!c){ senzaDati.push({item}); continue; }
+      const m = c.scelto.p.market;
+      (perMercato[m] = perMercato[m] || []).push({item, c});
+    }
+    const rigaHTML = ({item, c}) => `
+      <div class="prod" style="cursor:default;${item.done?"opacity:.45":""}">
+        <input type="checkbox" ${item.done?"checked":""} data-check="${esc(item.group)}" style="width:auto">
+        <div class="info">
+          <div class="nome" style="${item.done?"text-decoration:line-through":""}">${esc(item.group)}</div>
+          ${c?`<div class="meta">
+            <span class="market">${esc(c.scelto.p.market)}</span>
+            <span class="prezzo-mono">${fmtUnit(c.scelto.u.unitPrice, c.scelto.u.unitLabel)}</span>
+            ${stelleHTML(c.scelto.p.rating,true)}
+          </div>
+          ${c.alternativa?`<div class="meta" style="margin-top:2px;color:var(--termico)">più economico: ${esc(c.alternativa.p.market)} <span class="prezzo-mono">${fmtUnit(c.alternativa.u.unitPrice, c.alternativa.u.unitLabel)}</span> ${stelleHTML(c.alternativa.p.rating,true)}</div>`:""}`
+          :`<div class="meta">nessun prezzo pieno registrato ancora</div>`}
+        </div>
+        <span class="chip" data-rimuovi="${esc(item.group)}" style="color:var(--rosso)">✕</span>
+      </div>`;
+    corpo.innerHTML =
+      Object.keys(perMercato).sort().map(m => `
+        <h2>${esc(m)} <span style="font-weight:600">(${perMercato[m].length})</span></h2>
+        <div class="card">${perMercato[m].map(rigaHTML).join("")}</div>`).join("")
+      + (senzaDati.length?`<h2>Senza dati</h2><div class="card">${senzaDati.map(rigaHTML).join("")}</div>`:"")
+      + `<button class="btn secondario" id="ls-pulisci">Rimuovi le spuntate</button>`;
+    corpo.querySelectorAll("[data-check]").forEach(cb => cb.addEventListener("change", () => {
+      const it = LISTA.find(x => x.group===cb.dataset.check);
+      it.done = cb.checked; salvaLista(); disegna();
+    }));
+    corpo.querySelectorAll("[data-rimuovi]").forEach(b => b.addEventListener("click", () => {
+      LISTA = LISTA.filter(x => x.group!==b.dataset.rimuovi); salvaLista(); disegna();
+    }));
+    const pl = corpo.querySelector("#ls-pulisci");
+    if(pl) pl.addEventListener("click", () => {
+      LISTA = LISTA.filter(x => !x.done); salvaLista(); disegna();
+    });
+  }
+  disegna();
+}
+
 /* ================= routing ================= */
 let tabAttiva = "spesa";
 function render(){
   document.querySelectorAll("nav button").forEach(b =>
     b.classList.toggle("attiva", b.dataset.tab===tabAttiva));
   if(tabAttiva==="spesa") vistaSpesa();
+  else if(tabAttiva==="lista") vistaLista();
   else if(tabAttiva==="catalogo") vistaCatalogo();
   else if(tabAttiva==="confronta") vistaConfronta();
   else vistaAltro();
@@ -902,7 +1227,11 @@ document.querySelectorAll("nav button").forEach(b =>
 (async function(){
   await apriDB();
   await ricarica();
+  await caricaBozza();
+  await caricaLista();
   render();
+  if(SESSIONE) toast("Sessione scontrino ripresa: " + SESSIONE.receipt.market);
+  if(new URLSearchParams(location.search).get("scan")==="1") modaleScanner();
   if("serviceWorker" in navigator){
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }

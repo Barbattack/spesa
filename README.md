@@ -41,3 +41,12 @@ I dati vivono **solo sul dispositivo** dove li inserisci. Per usarli su più dis
 - **Fase 3 — Sync cloud** (Supabase): solo se il backup manuale si rivela insufficiente nell'uso reale.
 
 Nota tecnica: quando aggiorni `index.html`, incrementa `CACHE` in `sw.js` (es. `spesa-v2`) per forzare il refresh sui dispositivi installati.
+
+## v3 — sessione, offerte, lista, statistiche
+
+- **Sessione scontrino**: dalla tab Spesa, imposta supermercato+data una volta, scansiona (o cerca, per il banco) tutti i prodotti, poi inserisci i prezzi in sequenza con avanzamento e "salta". La bozza sopravvive a chiusure dell'app (salvata a ogni scansione). Codice noto ma di un altro supermercato → clona la scheda precompilata.
+- **Flag offerta**: spunta "In offerta" sul prezzo; le promo restano nello storico ma il Confronto e la Lista usano l'ultimo prezzo *pieno* (l'offerta recente è mostrata a parte).
+- **Lista della spesa**: aggiungi i gruppi che ti servono; l'app li smista per supermercato consigliato = il più economico tra i prodotti con gradimento entro 1 stella dal migliore del gruppo. Prezzo e stelle sempre visibili, alternativa più economica indicata.
+- **Statistiche** (tab Altro): spesa per mese e per supermercato (di ciò che registri), e "paniere personale" — variazione mediana dei tuoi prezzi pieni su 60+ giorni, con i rincari maggiori. Si popola da solo col tempo.
+- Scorciatoia: pressione lunga sull'icona → "Scansiona".
+- Migrazione automatica del database (v1→v2): i dati esistenti restano.
