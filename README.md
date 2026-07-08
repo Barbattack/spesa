@@ -27,6 +27,14 @@ PWA personale per catalogare i prezzi dei prodotti nei vari supermercati, confro
 
 I dati vivono **solo sul dispositivo** dove li inserisci. Per usarli su più dispositivi: sezione **Altro → Esporta backup** sul dispositivo principale, poi **Importa backup** sugli altri (unione o sostituzione). Consiglio: esporta un backup periodico anche solo come sicurezza — svuotare i dati del browser cancella il catalogo.
 
+## Codice a barre (v2)
+
+- **Scansiona** dalla tab Spesa: EAN già in catalogo → dritto al prezzo; EAN in più supermercati → mini-confronto e scegli dove sei; EAN nuovo → scheda precompilata da OpenFoodFacts (nome, marca, formato quando disponibili).
+- Richiede Chrome/Chromium su Android (API BarcodeDetector nativa). Fallback: inserimento manuale del codice.
+- La scansione funziona offline; il lookup OpenFoodFacts richiede rete (se manca, la scheda si compila a mano ma il codice resta associato).
+- Da una scheda esistente: "Associa codice a barre" per collegare l'EAN a prodotti creati prima.
+- Prodotti a peso del banco: codici interni del negozio, restano a inserimento manuale.
+
 ## Aggiornamenti futuri previsti
 
 - **Fase 2 — OCR scontrino**: foto → parsing via API Claude dietro un Cloudflare Worker (la key non sta mai nella pagina pubblica).

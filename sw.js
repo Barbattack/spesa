@@ -1,4 +1,4 @@
-const CACHE = "spesa-v1";
+const CACHE = "spesa-v2";
 const FILES = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -16,6 +16,7 @@ self.addEventListener("activate", e => {
 // Cache-first con aggiornamento in background (stale-while-revalidate)
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
+  if (new URL(e.request.url).origin !== self.location.origin) return; // OFF & co. passano diretti
   e.respondWith(
     caches.match(e.request).then(cached => {
       const rete = fetch(e.request)

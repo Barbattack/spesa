@@ -318,6 +318,120 @@ function cercaProdotti(query, limite=8){
     .map(x => x.p);
 }
 
+/* ================= codice a barre + OpenFoodFacts ================= */
+const normEan = e => String(e||"").replace(/\D/g,"").replace(/^0+/,"");
+const prodottiPerEan = ean => PRODOTTI.filter(p => p.ean && normEan(p.ean)===normEan(ean));
+let streamAttivo = null;
+function fermaCamera(){
+  if(streamAttivo){ streamAttivo.getTracks().forEach(t => t.stop()); streamAttivo = null; }
+}
+async function scannerSupportato(){
+  if(!("BarcodeDetector" in window)) return false;
+  try{ // feature detection difensiva: l'interfaccia può esserci ma la piattaforma no
+    const c = document.createElement("canvas"); c.width = c.height = 2;
+    await new BarcodeDetector({formats:["ean_13"]}).detect(c);
+    return true;
+  }catch(e){ return e.name !== "NotSupportedError"; }
+}
+async function modaleScanner(onEan){
+  const gestisci = typeof onEan === "function" ? onEan : gestisciEan;
+  const velo = apriModale(`
+    <h3>Scansiona codice a barre</h3>
+    <video id="sc-video" playsinline style="width:100%;border-radius:10px;border:1.5px solid var(--linea);background:#000;aspect-ratio:4/3;object-fit:cover"></video>
+    <p class="nota" id="sc-stato">Inquadra il codice a barre del prodotto.</p>
+    <label for="sc-manuale">Oppure inserisci il codice a mano</label>
+    <div class="riga">
+      <input id="sc-manuale" inputmode="numeric" placeholder="es. 8001120000000" class="prezzo-mono">
+      <button class="btn" style="margin-top:0;flex:0 0 auto;width:auto" id="sc-vai">Vai</button>
+    </div>`);
+  const stato = velo.querySelector("#sc-stato");
+  velo.querySelector("#sc-vai").addEventListener("click", () => {
+    const e = normEan(velo.querySelector("#sc-manuale").value);
+    if(e.length < 7) return toast("Codice troppo corto");
+    fermaCamera(); chiudiModale(); gestisci(e);
+  });
+  if(!(await scannerSupportato())){
+    stato.textContent = "Scanner non disponibile su questo browser: usa l'inserimento manuale qui sotto.";
+    velo.querySelector("#sc-video").style.display = "none";
+    return;
+  }
+  try{
+    const video = velo.querySelector("#sc-video");
+    streamAttivo = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    video.srcObject = streamAttivo;
+    await video.play();
+    const det = new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e"]});
+    const loop = setInterval(async () => {
+      if(!streamAttivo){ clearInterval(loop); return; }
+      try{
+        const codes = await det.detect(video);
+        if(codes.length){
+          clearInterval(loop);
+          const ean = normEan(codes[0].rawValue);
+          fermaCamera(); chiudiModale();
+          if(navigator.vibrate) navigator.vibrate(60);
+          gestisci(ean);
+        }
+      }catch(e){ /* frame non leggibile, si riprova */ }
+    }, 250);
+  }catch(err){
+    stato.textContent = "Fotocamera non accessibile (permesso negato?). Usa l'inserimento manuale.";
+  }
+}
+function gestisciEan(ean){
+  const corrisp = prodottiPerEan(ean);
+  if(corrisp.length === 1) return modalePrezzo(corrisp[0].id);
+  if(corrisp.length > 1) return modaleScelteEan(corrisp);
+  cercaOFF(ean);
+}
+function modaleScelteEan(prodotti){
+  // stesso EAN in più supermercati: mini confronto, poi scelta
+  const conU = prodotti.map(p => ({p, u: ultimoAcquisto(p.id)}));
+  const min = Math.min(...conU.filter(r => r.u).map(r => r.u.unitPrice));
+  const velo = apriModale(`
+    <h3>${esc(prodotti[0].name)}</h3>
+    <p class="nota" style="margin-top:2px">Ce l'hai in ${prodotti.length} supermercati. Dove lo stai comprando?</p>
+    <div class="card">${conU.map(({p,u}) => `
+      <div class="prod" data-id="${p.id}">
+        <div class="info">
+          <div class="nome">${esc(p.market)}</div>
+          <div class="meta">${stelleHTML(p.rating,true)}</div>
+        </div>
+        ${u?`<div class="cartellino ${u.unitPrice===min?"migliore":""}">
+          <span class="u">€/${u.unitLabel}</span><span class="v">${u.unitPrice.toFixed(2).replace(".",",")}</span>
+        </div>`:""}
+      </div>`).join("")}
+    </div>`);
+  velo.querySelectorAll(".prod").forEach(el =>
+    el.addEventListener("click", () => modalePrezzo(el.dataset.id)));
+}
+async function cercaOFF(ean){
+  toast("Codice nuovo, cerco su OpenFoodFacts…");
+  let prefill = {ean};
+  try{
+    const r = await fetch("https://world.openfoodfacts.org/api/v2/product/" + ean +
+      ".json?fields=product_name,product_name_it,brands,quantity,product_quantity,product_quantity_unit");
+    const j = await r.json();
+    if(j.status === 1 && j.product){
+      const pr = j.product;
+      const nome = [pr.product_name_it || pr.product_name, pr.brands ? "("+pr.brands.split(",")[0].trim()+")" : ""]
+        .filter(Boolean).join(" ");
+      prefill.nome = nome;
+      const unitMap = {g:"g", kg:"kg", ml:"ml", l:"l", cl:"ml"};
+      if(pr.product_quantity && unitMap[pr.product_quantity_unit]){
+        prefill.qty = pr.product_quantity_unit==="cl" ? pr.product_quantity*10 : pr.product_quantity;
+        prefill.unit = unitMap[pr.product_quantity_unit];
+      }
+      toast("Trovato: " + (pr.product_name_it || pr.product_name));
+    }else{
+      toast("Non è su OpenFoodFacts: compila la scheda a mano");
+    }
+  }catch(e){
+    toast("Rete assente: compila la scheda a mano, il codice resta associato");
+  }
+  modaleNuovoProdotto(prefill.nome || "", prefill);
+}
+
 /* ================= util UI ================= */
 const $ = sel => document.querySelector(sel);
 const vista = $("#vista");
@@ -345,7 +459,7 @@ function apriModale(html){
   document.body.appendChild(velo);
   return velo;
 }
-function chiudiModale(){ document.querySelectorAll(".velo").forEach(v => v.remove()); }
+function chiudiModale(){ fermaCamera(); document.querySelectorAll(".velo").forEach(v => v.remove()); }
 const oggi = () => new Date().toISOString().slice(0,10);
 const fmtData = d => { const [a,m,g] = d.split("-"); return g+"/"+m+"/"+a.slice(2); };
 function datalistMercati(){
@@ -361,11 +475,14 @@ function datalistGruppi(){
 function vistaSpesa(){
   vista.innerHTML = `
     <h2>Inserimento rapido</h2>
+    <button class="btn" id="btn-scan" style="margin-top:0">📷 Scansiona codice a barre</button>
+    <div style="text-align:center;color:var(--termico);font-size:.75rem;margin:10px 0 8px">— oppure cerca a mano —</div>
     <input id="cerca" type="search" placeholder="Cerca prodotto… (es. prosciutto)" autocomplete="off">
     <div id="risultati" class="card" style="margin-top:10px;display:none"></div>
     <div id="suggerimento-nuovo"></div>
     <button class="btn secondario" id="btn-nuovo">+ Nuovo prodotto</button>
-    <p class="nota">Cerca un prodotto già in catalogo e registra solo il prezzo dello scontrino. Il prezzo al kg lo calcolo io dal formato della scheda.</p>`;
+    <p class="nota">Scansiona il codice a barre: se il prodotto è in catalogo vai dritto al prezzo, se è nuovo la scheda si precompila da OpenFoodFacts. Il prezzo al kg lo calcolo io dal formato.</p>`;
+  $("#btn-scan").addEventListener("click", modaleScanner);
   const cerca = $("#cerca"), ris = $("#risultati");
   cerca.addEventListener("input", () => {
     const q = cerca.value;
@@ -442,9 +559,10 @@ function modalePrezzo(pid){
   iP.focus();
 }
 
-function modaleNuovoProdotto(nomeIniziale=""){
+function modaleNuovoProdotto(nomeIniziale="", prefill={}){
   const velo = apriModale(`
     <h3>Nuovo prodotto</h3>
+    ${prefill.ean?`<p class="nota" style="margin-top:2px">Codice a barre <span class="prezzo-mono">${esc(prefill.ean)}</span> — resterà associato alla scheda.</p>`:""}
     <label for="np-nome">Nome (come lo riconosci tu)</label>
     <input id="np-nome" placeholder="es. Prosciutto crudo vaschetta" value="${esc(nomeIniziale)}">
     <label for="np-gruppo">Gruppo di confronto</label>
@@ -462,11 +580,9 @@ function modaleNuovoProdotto(nomeIniziale=""){
       </select>
     </div>
     <div class="riga" id="np-riga-formato" style="margin-top:8px">
-      <input id="np-qty" type="number" inputmode="decimal" step="any" min="0" placeholder="Quantità (es. 100)">
+      <input id="np-qty" type="number" inputmode="decimal" step="any" min="0" placeholder="Quantità (es. 100)" value="${prefill.qty||""}">
       <select id="np-unit">
-        <option value="g">g</option><option value="kg">kg</option>
-        <option value="ml">ml</option><option value="l">l</option>
-        <option value="pz">pz</option>
+        ${["g","kg","ml","l","pz"].map(u => `<option value="${u}" ${prefill.unit===u?"selected":""}>${u}</option>`).join("")}
       </select>
     </div>
     <label>Gradimento (opzionale)</label>
@@ -499,7 +615,8 @@ function modaleNuovoProdotto(nomeIniziale=""){
     const p = {
       id: uid(), name, market,
       group: velo.querySelector("#np-gruppo").value.trim() || name,
-      format, rating, formatHistory: [], createdAt: Date.now()
+      format, rating, formatHistory: [], createdAt: Date.now(),
+      ean: prefill.ean || null
     };
     await salvaProdotto(p);
     await ricarica();
@@ -558,7 +675,7 @@ function modaleDettaglio(pid){
     .sort((a,b) => b.date.localeCompare(a.date) || (b.createdAt||0)-(a.createdAt||0));
   const velo = apriModale(`
     <h3>${esc(p.name)}</h3>
-    <div class="meta" style="font-size:.8rem;color:var(--termico)">${esc(p.market)} · ${fmtFormato(p.format)} · gruppo: ${esc(p.group)}</div>
+    <div class="meta" style="font-size:.8rem;color:var(--termico)">${esc(p.market)} · ${fmtFormato(p.format)} · gruppo: ${esc(p.group)}${p.ean?` · <span class="prezzo-mono">${esc(p.ean)}</span>`:""}</div>
     <label>Gradimento</label>
     ${stelleHTML(p.rating,false,true)}
     <h2>Storico prezzi (${acquisti.length})</h2>
@@ -574,6 +691,7 @@ function modaleDettaglio(pid){
     }</div>
     <button class="btn" id="dt-prezzo">Registra prezzo</button>
     <button class="btn secondario" id="dt-formato">Modifica formato</button>
+    <button class="btn secondario" id="dt-ean">${p.ean?"Aggiorna":"Associa"} codice a barre</button>
     <button class="btn pericolo" id="dt-elimina">Elimina prodotto</button>
     ${p.formatHistory && p.formatHistory.length ? `<p class="nota">Formati precedenti: ${p.formatHistory.map(f => fmtFormato(f) + " (fino al " + fmtData(f.until) + ")").join(", ")}. Gli acquisti passati conservano il €/unità dell'epoca.</p>`:""}`);
   velo.querySelector("[data-stelle]").addEventListener("click", async e => {
@@ -596,6 +714,17 @@ function modaleDettaglio(pid){
     }));
   velo.querySelector("#dt-prezzo").addEventListener("click", () => modalePrezzo(pid));
   velo.querySelector("#dt-formato").addEventListener("click", () => modaleFormato(pid));
+  velo.querySelector("#dt-ean").addEventListener("click", () => {
+    modaleScanner(async ean => {
+      const doppio = prodottiPerEan(ean).find(x => x.id!==pid && x.market===p.market);
+      if(doppio && !confirm(`Questo codice è già associato a "${doppio.name}" (${doppio.market}). Associarlo anche qui?`)) return modaleDettaglio(pid);
+      p.ean = ean;
+      await salvaProdotto(p);
+      await ricarica();
+      toast("Codice associato");
+      modaleDettaglio(pid);
+    });
+  });
   velo.querySelector("#dt-elimina").addEventListener("click", async () => {
     if(!confirm(`Eliminare "${p.name}" e tutto il suo storico?`)) return;
     for(const a of acquisti) await eliminaAcquisto(a.id);
