@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spesa — catalogo prezzi</title>
+<meta name="description" content="Catalogo personale dei prezzi al supermercato, con prezzo unitario e gradimento.">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#FFD335">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --carta:#FAFAF7;
+  --inchiostro:#1C1B18;
+  --giallo:#FFD335;
+  --verde:#1E7A46;
+  --rosso:#C93B2E;
+  --termico:#85827A;
+  --linea:#E4E2DA;
+  --mono:ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,monospace;
+  --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{height:100%}
+body{
+  font-family:var(--sans);
+  background:var(--carta);
+  color:var(--inchiostro);
+  min-height:100%;
+  padding-bottom:calc(64px + env(safe-area-inset-bottom));
+  -webkit-tap-highlight-color:transparent;
+}
+header{
+  padding:14px 16px 10px;
+  border-bottom:2px solid var(--inchiostro);
+  display:flex;align-items:baseline;gap:10px;
+}
+header h1{
+  font-size:1.15rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+}
+header .sub{font-family:var(--mono);font-size:.7rem;color:var(--termico)}
+main{padding:14px 14px 20px;max-width:640px;margin:0 auto}
+h2{font-size:.8rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin:18px 0 8px;color:var(--termico)}
+h2:first-child{margin-top:2px}
+
+/* ---- nav ---- */
+nav{
+  position:fixed;bottom:0;left:0;right:0;z-index:20;
+  background:var(--inchiostro);
+  display:flex;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav button{
+  flex:1;background:none;border:none;color:#B6B3A8;
+  font-family:var(--sans);font-size:.68rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.05em;
+  padding:10px 2px 12px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+}
+nav button .ic{font-size:1.05rem;line-height:1}
+nav button.attiva{color:var(--giallo)}
+nav button:focus-visible{outline:2px solid var(--giallo);outline-offset:-2px}
+
+/* ---- comuni ---- */
+.card{
+  background:#fff;border:1px solid var(--linea);border-radius:10px;
+  padding:12px;margin-bottom:10px;
+}
+input,select{
+  font-family:var(--sans);font-size:1rem;
+  padding:10px 12px;border:1.5px solid var(--linea);border-radius:8px;
+  background:#fff;color:var(--inchiostro);width:100%;
+}
+input:focus,select:focus{outline:none;border-color:var(--inchiostro)}
+input[type=number]{font-family:var(--mono)}
+label{display:block;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--termico);margin:10px 0 4px}
+.riga{display:flex;gap:8px}
+.riga>*{flex:1}
+.btn{
+  display:inline-block;font-family:var(--sans);font-size:.95rem;font-weight:800;
+  padding:12px 16px;border-radius:8px;border:2px solid var(--inchiostro);
+  background:var(--inchiostro);color:var(--carta);cursor:pointer;width:100%;
+  text-transform:uppercase;letter-spacing:.04em;margin-top:14px;
+}
+.btn.secondario{background:transparent;color:var(--inchiostro)}
+.btn.pericolo{background:transparent;border-color:var(--rosso);color:var(--rosso)}
+.btn:focus-visible{outline:3px solid var(--giallo);outline-offset:2px}
+.btn:disabled{opacity:.4;cursor:default}
+.vuoto{
+  text-align:center;color:var(--termico);padding:34px 16px;
+  font-size:.92rem;line-height:1.5;
+}
+.vuoto strong{color:var(--inchiostro)}
+
+/* ---- prodotto in lista ---- */
+.prod{
+  display:flex;align-items:center;gap:10px;
+  padding:11px 4px;border-bottom:1px dashed var(--linea);
+  cursor:pointer;
+}
+.prod:last-child{border-bottom:none}
+.prod .info{flex:1;min-width:0}
+.prod .nome{font-weight:700;font-size:.98rem}
+.prod .meta{font-size:.75rem;color:var(--termico);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}
+.prod .meta .market{font-weight:700;color:var(--inchiostro)}
+.prezzo-mono{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ---- cartellino: elemento firma ---- */
+.cartellino{
+  font-family:var(--mono);font-variant-numeric:tabular-nums;
+  background:#fff;border:1.5px solid var(--inchiostro);
+  padding:5px 9px 4px;border-radius:3px;text-align:right;line-height:1.05;
+  min-width:86px;position:relative;
+}
+.cartellino .u{display:block;font-size:.6rem;color:var(--termico);letter-spacing:.03em}
+.cartellino .v{font-size:1.02rem;font-weight:700}
+.cartellino.migliore{background:var(--giallo);border-width:2px}
+.cartellino.migliore::before{
+  content:"";position:absolute;left:-7px;top:50%;width:10px;height:10px;
+  background:var(--carta);border:1.5px solid var(--inchiostro);border-radius:50%;
+  transform:translateY(-50%) ;
+}
+.cartellino.migliore .u{color:var(--inchiostro)}
+
+/* ---- stelle ---- */
+.stelle{display:inline-flex;gap:2px;font-size:1.05rem;line-height:1;user-select:none}
+.stelle span{color:#D7D4C9;cursor:pointer}
+.stelle span.piena{color:var(--inchiostro)}
+.stelle.mini{font-size:.85rem}
+.stelle.mini span{cursor:default}
+
+/* ---- chips filtro ---- */
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chip{
+  font-size:.78rem;font-weight:700;padding:6px 12px;border-radius:99px;
+  border:1.5px solid var(--linea);background:#fff;cursor:pointer;color:var(--termico);
+}
+.chip.attiva{border-color:var(--inchiostro);color:var(--inchiostro);background:var(--giallo)}
+
+/* ---- modale ---- */
+.velo{
+  position:fixed;inset:0;background:rgba(28,27,24,.5);z-index:30;
+  display:flex;align-items:flex-end;justify-content:center;
+}
+.modale{
+  background:var(--carta);width:100%;max-width:640px;
+  border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));
+  max-height:88vh;overflow-y:auto;
+}
+.modale h3{font-size:1.05rem;font-weight:800;margin-bottom:4px}
+.modale .chiudi{
+  float:right;background:none;border:none;font-size:1.5rem;line-height:1;
+  cursor:pointer;color:var(--termico);padding:2px 6px;
+}
+@media (prefers-reduced-motion:no-preference){
+  .modale{animation:sale .18s ease-out}
+  @keyframes sale{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+}
+
+/* ---- storico acquisti ---- */
+.storico{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:.85rem}
+.storico .r{display:flex;justify-content:space-between;padding:7px 2px;border-bottom:1px dashed var(--linea)}
+.storico .r:last-child{border-bottom:none}
+.storico .d{color:var(--termico)}
+
+/* ---- confronto ---- */
+.gruppo .titolo{
+  font-weight:800;font-size:1rem;margin-bottom:8px;
+  display:flex;justify-content:space-between;align-items:baseline;
+}
+.gruppo .titolo .n{font-size:.7rem;color:var(--termico);font-weight:600}
+.griglia-conf .prod{cursor:default}
+
+.badge-nuovo{
+  background:var(--verde);color:#fff;font-size:.62rem;font-weight:800;
+  padding:2px 6px;border-radius:3px;letter-spacing:.05em;
+}
+.nota{font-size:.78rem;color:var(--termico);line-height:1.45;margin-top:8px}
+.toast{
+  position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom));
+  transform:translateX(-50%);z-index:40;
+  background:var(--inchiostro);color:var(--carta);
+  font-size:.85rem;font-weight:600;padding:10px 18px;border-radius:99px;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+  max-width:90vw;text-align:center;
+}
+.toast.visibile{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>Spesa</h1>
+  <span class="sub">catalogo prezzi &amp; gradimento</span>
+</header>
+
+<main id="vista"></main>
+
+<nav aria-label="Sezioni">
+  <button data-tab="spesa" class="attiva"><span class="ic">🧾</span>Spesa</button>
+  <button data-tab="catalogo"><span class="ic">🗂</span>Catalogo</button>
+  <button data-tab="confronta"><span class="ic">⚖️</span>Confronta</button>
+  <button data-tab="altro"><span class="ic">⋯</span>Altro</button>
+</nav>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+/* ================= DB (IndexedDB) ================= */
+const DB_NOME = "spesa-db", DB_VER = 1;
+let db;
+function apriDB(){
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open(DB_NOME, DB_VER);
+    rq.onupgradeneeded = e => {
+      const d = e.target.result;
+      if(!d.objectStoreNames.contains("prodotti")) d.createObjectStore("prodotti",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("acquisti")){
+        const s = d.createObjectStore("acquisti",{keyPath:"id"});
+        s.createIndex("perProdotto","productId",{unique:false});
+      }
+    };
+    rq.onsuccess = e => { db = e.target.result; res(); };
+    rq.onerror = () => rej(rq.error);
+  });
+}
+function tx(store, mode, fn){
+  return new Promise((res, rej) => {
+    const t = db.transaction(store, mode);
+    const s = t.objectStore(store);
+    const out = fn(s);
+    t.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined);
+    t.onerror = () => rej(t.error);
+  });
+}
+function tutti(store){
+  return new Promise((res, rej) => {
+    const rq = db.transaction(store).objectStore(store).getAll();
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+const salvaProdotto = p => tx("prodotti","readwrite", s => s.put(p));
+const eliminaProdotto = id => tx("prodotti","readwrite", s => s.delete(id));
+const salvaAcquisto = a => tx("acquisti","readwrite", s => s.put(a));
+const eliminaAcquisto = id => tx("acquisti","readwrite", s => s.delete(id));
+
+/* ================= stato in memoria ================= */
+let PRODOTTI = [], ACQUISTI = [];
+async function ricarica(){
+  [PRODOTTI, ACQUISTI] = await Promise.all([tutti("prodotti"), tutti("acquisti")]);
+}
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+
+/* ================= prezzo unitario ================= */
+/* format: {mode:'conf'|'peso', qty, unit}  unit: g|kg|ml|l|pz */
+function baseUnita(u){
+  if(u==="g") return {f:1/1000, label:"kg"};
+  if(u==="kg") return {f:1, label:"kg"};
+  if(u==="ml") return {f:1/1000, label:"L"};
+  if(u==="l") return {f:1, label:"L"};
+  return {f:1, label:"pz"};
+}
+function prezzoUnitario(prod, prezzo, pesoKg){
+  if(prod.format.mode==="peso"){
+    if(!pesoKg) return null;
+    return {v: prezzo/pesoKg, label:"kg"};
+  }
+  const b = baseUnita(prod.format.unit);
+  const q = prod.format.qty * b.f;
+  if(!q) return null;
+  return {v: prezzo/q, label: b.label};
+}
+const fmtEuro = v => "€ " + v.toFixed(2).replace(".",",");
+const fmtUnit = (v,l) => fmtEuro(v) + "/" + l;
+function fmtFormato(f){
+  if(f.mode==="peso") return "a peso";
+  return f.qty + " " + (f.unit==="pz" ? (f.qty===1?"pz":"pz") : f.unit);
+}
+function ultimoAcquisto(pid){
+  const a = ACQUISTI.filter(x => x.productId===pid);
+  if(!a.length) return null;
+  a.sort((x,y) => y.date.localeCompare(x.date) || (y.createdAt||0)-(x.createdAt||0));
+  return a[0];
+}
+
+/* ================= fuzzy matching ================= */
+function normalizza(s){
+  return s.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9]+/g," ").trim();
+}
+function punteggio(query, testo){
+  const qt = normalizza(query).split(" ").filter(Boolean);
+  const tt = normalizza(testo).split(" ").filter(Boolean);
+  if(!qt.length || !tt.length) return 0;
+  let tot = 0;
+  for(const q of qt){
+    let best = 0;
+    for(const t of tt){
+      if(t===q) best = Math.max(best,1);
+      else if(t.startsWith(q) && q.length>=2) best = Math.max(best,.85);
+      else if(q.startsWith(t) && t.length>=3) best = Math.max(best,.7);
+      else if(t.includes(q) && q.length>=3) best = Math.max(best,.5);
+    }
+    tot += best;
+  }
+  return tot/qt.length;
+}
+function cercaProdotti(query, limite=8){
+  if(!query.trim()) return [];
+  return PRODOTTI
+    .map(p => ({p, s: Math.max(punteggio(query, p.name), punteggio(query, p.group||""))}))
+    .filter(x => x.s > .3)
+    .sort((a,b) => b.s-a.s)
+    .slice(0, limite)
+    .map(x => x.p);
+}
+
+/* ================= util UI ================= */
+const $ = sel => document.querySelector(sel);
+const vista = $("#vista");
+function esc(s){ return String(s??"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+let toastTimer;
+function toast(msg){
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("visibile");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("visibile"), 2200);
+}
+function stelleHTML(val, mini=false, editabile=false){
+  let h = `<span class="stelle${mini?" mini":""}"${editabile?' data-stelle="1"':""}>`;
+  for(let i=1;i<=5;i++) h += `<span data-v="${i}" class="${i<=(val||0)?"piena":""}">★</span>`;
+  return h + "</span>";
+}
+function apriModale(html){
+  chiudiModale();
+  const velo = document.createElement("div");
+  velo.className = "velo";
+  velo.innerHTML = `<div class="modale" role="dialog" aria-modal="true">
+    <button class="chiudi" aria-label="Chiudi">×</button>${html}</div>`;
+  velo.addEventListener("click", e => { if(e.target===velo || e.target.classList.contains("chiudi")) chiudiModale(); });
+  document.body.appendChild(velo);
+  return velo;
+}
+function chiudiModale(){ document.querySelectorAll(".velo").forEach(v => v.remove()); }
+const oggi = () => new Date().toISOString().slice(0,10);
+const fmtData = d => { const [a,m,g] = d.split("-"); return g+"/"+m+"/"+a.slice(2); };
+function datalistMercati(){
+  const m = [...new Set(PRODOTTI.map(p => p.market))].sort();
+  return `<datalist id="dl-mercati">${m.map(x => `<option value="${esc(x)}">`).join("")}</datalist>`;
+}
+function datalistGruppi(){
+  const g = [...new Set(PRODOTTI.map(p => p.group).filter(Boolean))].sort();
+  return `<datalist id="dl-gruppi">${g.map(x => `<option value="${esc(x)}">`).join("")}</datalist>`;
+}
+
+/* ================= TAB: Spesa (inserimento rapido) ================= */
+function vistaSpesa(){
+  vista.innerHTML = `
+    <h2>Inserimento rapido</h2>
+    <input id="cerca" type="search" placeholder="Cerca prodotto… (es. prosciutto)" autocomplete="off">
+    <div id="risultati" class="card" style="margin-top:10px;display:none"></div>
+    <div id="suggerimento-nuovo"></div>
+    <button class="btn secondario" id="btn-nuovo">+ Nuovo prodotto</button>
+    <p class="nota">Cerca un prodotto già in catalogo e registra solo il prezzo dello scontrino. Il prezzo al kg lo calcolo io dal formato della scheda.</p>`;
+  const cerca = $("#cerca"), ris = $("#risultati");
+  cerca.addEventListener("input", () => {
+    const q = cerca.value;
+    const trovati = cercaProdotti(q);
+    if(!q.trim()){ ris.style.display="none"; return; }
+    ris.style.display = "block";
+    if(!trovati.length){
+      ris.innerHTML = `<div class="vuoto" style="padding:18px">Nessuna scheda trovata per «${esc(q)}».<br>Creala con <strong>+ Nuovo prodotto</strong>.</div>`;
+      return;
+    }
+    ris.innerHTML = trovati.map(p => {
+      const u = ultimoAcquisto(p.id);
+      return `<div class="prod" data-id="${p.id}">
+        <div class="info">
+          <div class="nome">${esc(p.name)}</div>
+          <div class="meta"><span class="market">${esc(p.market)}</span><span>${fmtFormato(p.format)}</span>${p.group?`<span>${esc(p.group)}</span>`:""}</div>
+        </div>
+        ${u?`<div class="cartellino"><span class="u">ultimo €/${u.unitLabel}</span><span class="v">${u.unitPrice.toFixed(2).replace(".",",")}</span></div>`:'<span class="badge-nuovo">MAI COMPRATO</span>'}
+      </div>`;
+    }).join("");
+    ris.querySelectorAll(".prod").forEach(el =>
+      el.addEventListener("click", () => modalePrezzo(el.dataset.id)));
+  });
+  $("#btn-nuovo").addEventListener("click", () => modaleNuovoProdotto(cerca.value.trim()));
+  cerca.focus();
+}
+
+function modalePrezzo(pid){
+  const p = PRODOTTI.find(x => x.id===pid);
+  if(!p) return;
+  const peso = p.format.mode==="peso";
+  const velo = apriModale(`
+    <h3>${esc(p.name)}</h3>
+    <div class="meta" style="font-size:.8rem;color:var(--termico)">${esc(p.market)} · ${fmtFormato(p.format)}</div>
+    <label for="mp-prezzo">Prezzo pagato (€)</label>
+    <input id="mp-prezzo" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+    ${peso?`<label for="mp-peso">Peso (g)</label>
+    <input id="mp-peso" type="number" inputmode="decimal" step="1" min="0" placeholder="es. 380">`:""}
+    <label for="mp-data">Data</label>
+    <input id="mp-data" type="date" value="${oggi()}">
+    <div id="mp-anteprima" class="nota"></div>
+    <button class="btn" id="mp-salva">Salva prezzo</button>`);
+  const iP = velo.querySelector("#mp-prezzo"), iW = velo.querySelector("#mp-peso"),
+        ant = velo.querySelector("#mp-anteprima");
+  function anteprima(){
+    const prezzo = parseFloat(iP.value.replace(",","."));
+    const pesoKg = peso ? parseFloat((iW.value||"").replace(",","."))/1000 : null;
+    if(!prezzo){ ant.textContent=""; return; }
+    const u = prezzoUnitario(p, prezzo, pesoKg);
+    ant.textContent = u ? "Prezzo unitario: " + fmtUnit(u.v, u.label) : (peso ? "Inserisci il peso per il €/kg." : "");
+  }
+  iP.addEventListener("input", anteprima);
+  if(iW) iW.addEventListener("input", anteprima);
+  velo.querySelector("#mp-salva").addEventListener("click", async () => {
+    const prezzo = parseFloat(iP.value.replace(",","."));
+    if(!prezzo || prezzo<=0) return toast("Inserisci un prezzo valido");
+    let pesoKg = null;
+    if(peso){
+      pesoKg = parseFloat((iW.value||"").replace(",","."))/1000;
+      if(!pesoKg || pesoKg<=0) return toast("Inserisci il peso");
+    }
+    const u = prezzoUnitario(p, prezzo, pesoKg);
+    await salvaAcquisto({
+      id: uid(), productId: p.id, price: prezzo,
+      weightKg: pesoKg, unitPrice: u.v, unitLabel: u.label,
+      date: velo.querySelector("#mp-data").value || oggi(),
+      createdAt: Date.now()
+    });
+    await ricarica();
+    chiudiModale();
+    toast("Salvato: " + fmtUnit(u.v, u.label));
+    render();
+  });
+  iP.focus();
+}
+
+function modaleNuovoProdotto(nomeIniziale=""){
+  const velo = apriModale(`
+    <h3>Nuovo prodotto</h3>
+    <label for="np-nome">Nome (come lo riconosci tu)</label>
+    <input id="np-nome" placeholder="es. Prosciutto crudo vaschetta" value="${esc(nomeIniziale)}">
+    <label for="np-gruppo">Gruppo di confronto</label>
+    <input id="np-gruppo" list="dl-gruppi" placeholder="es. Prosciutto crudo">
+    ${datalistGruppi()}
+    <div class="nota" style="margin-top:4px">Prodotti con lo stesso gruppo vengono confrontati tra supermercati.</div>
+    <label for="np-market">Supermercato</label>
+    <input id="np-market" list="dl-mercati" placeholder="es. Lidl">
+    ${datalistMercati()}
+    <label>Formato</label>
+    <div class="riga">
+      <select id="np-mode">
+        <option value="conf">Confezione fissa</option>
+        <option value="peso">A peso (banco / sfuso)</option>
+      </select>
+    </div>
+    <div class="riga" id="np-riga-formato" style="margin-top:8px">
+      <input id="np-qty" type="number" inputmode="decimal" step="any" min="0" placeholder="Quantità (es. 100)">
+      <select id="np-unit">
+        <option value="g">g</option><option value="kg">kg</option>
+        <option value="ml">ml</option><option value="l">l</option>
+        <option value="pz">pz</option>
+      </select>
+    </div>
+    <label>Gradimento (opzionale)</label>
+    ${stelleHTML(0,false,true)}
+    <button class="btn" id="np-salva">Crea scheda</button>`);
+  let rating = 0;
+  velo.querySelector("[data-stelle]").addEventListener("click", e => {
+    const v = e.target.dataset.v;
+    if(!v) return;
+    rating = parseInt(v,10);
+    velo.querySelectorAll("[data-stelle] span").forEach(s =>
+      s.classList.toggle("piena", parseInt(s.dataset.v,10)<=rating));
+  });
+  const mode = velo.querySelector("#np-mode");
+  mode.addEventListener("change", () => {
+    velo.querySelector("#np-riga-formato").style.display = mode.value==="peso" ? "none" : "flex";
+  });
+  velo.querySelector("#np-salva").addEventListener("click", async () => {
+    const name = velo.querySelector("#np-nome").value.trim();
+    const market = velo.querySelector("#np-market").value.trim();
+    if(!name) return toast("Serve il nome");
+    if(!market) return toast("Serve il supermercato");
+    let format;
+    if(mode.value==="peso") format = {mode:"peso"};
+    else{
+      const qty = parseFloat((velo.querySelector("#np-qty").value||"").replace(",","."));
+      if(!qty || qty<=0) return toast("Serve la quantità del formato");
+      format = {mode:"conf", qty, unit: velo.querySelector("#np-unit").value};
+    }
+    const p = {
+      id: uid(), name, market,
+      group: velo.querySelector("#np-gruppo").value.trim() || name,
+      format, rating, formatHistory: [], createdAt: Date.now()
+    };
+    await salvaProdotto(p);
+    await ricarica();
+    chiudiModale();
+    toast("Scheda creata");
+    modalePrezzo(p.id); // subito il primo prezzo
+  });
+  velo.querySelector("#np-nome").focus();
+}
+
+/* ================= TAB: Catalogo ================= */
+let filtroMercato = null, filtroTesto = "";
+function vistaCatalogo(){
+  const mercati = [...new Set(PRODOTTI.map(p => p.market))].sort();
+  vista.innerHTML = `
+    <h2>Catalogo <span style="font-weight:600">(${PRODOTTI.length})</span></h2>
+    <input id="cat-cerca" type="search" placeholder="Filtra…" value="${esc(filtroTesto)}" autocomplete="off">
+    <div class="chips" style="margin-top:10px">
+      <button class="chip ${!filtroMercato?"attiva":""}" data-m="">Tutti</button>
+      ${mercati.map(m => `<button class="chip ${filtroMercato===m?"attiva":""}" data-m="${esc(m)}">${esc(m)}</button>`).join("")}
+    </div>
+    <div id="cat-lista"></div>`;
+  $("#cat-cerca").addEventListener("input", e => { filtroTesto = e.target.value; disegnaCatalogo(); });
+  vista.querySelectorAll(".chip").forEach(c =>
+    c.addEventListener("click", () => { filtroMercato = c.dataset.m || null; vistaCatalogo(); }));
+  disegnaCatalogo();
+}
+function disegnaCatalogo(){
+  const box = $("#cat-lista");
+  let lista = PRODOTTI.slice();
+  if(filtroMercato) lista = lista.filter(p => p.market===filtroMercato);
+  if(filtroTesto.trim()) lista = cercaProdotti(filtroTesto, 100).filter(p => !filtroMercato || p.market===filtroMercato);
+  if(!lista.length){
+    box.innerHTML = `<div class="vuoto">${PRODOTTI.length?"Nessun prodotto corrisponde ai filtri.":"Il catalogo è vuoto.<br>Crea la prima scheda dalla sezione <strong>Spesa</strong>."}</div>`;
+    return;
+  }
+  lista.sort((a,b) => (a.group||a.name).localeCompare(b.group||b.name) || a.name.localeCompare(b.name));
+  box.innerHTML = `<div class="card">` + lista.map(p => {
+    const u = ultimoAcquisto(p.id);
+    return `<div class="prod" data-id="${p.id}">
+      <div class="info">
+        <div class="nome">${esc(p.name)}</div>
+        <div class="meta"><span class="market">${esc(p.market)}</span><span>${fmtFormato(p.format)}</span>${stelleHTML(p.rating,true)}</div>
+      </div>
+      ${u?`<div class="cartellino"><span class="u">€/${u.unitLabel}</span><span class="v">${u.unitPrice.toFixed(2).replace(".",",")}</span></div>`:""}
+    </div>`;
+  }).join("") + "</div>";
+  box.querySelectorAll(".prod").forEach(el =>
+    el.addEventListener("click", () => modaleDettaglio(el.dataset.id)));
+}
+
+function modaleDettaglio(pid){
+  const p = PRODOTTI.find(x => x.id===pid);
+  if(!p) return;
+  const acquisti = ACQUISTI.filter(a => a.productId===pid)
+    .sort((a,b) => b.date.localeCompare(a.date) || (b.createdAt||0)-(a.createdAt||0));
+  const velo = apriModale(`
+    <h3>${esc(p.name)}</h3>
+    <div class="meta" style="font-size:.8rem;color:var(--termico)">${esc(p.market)} · ${fmtFormato(p.format)} · gruppo: ${esc(p.group)}</div>
+    <label>Gradimento</label>
+    ${stelleHTML(p.rating,false,true)}
+    <h2>Storico prezzi (${acquisti.length})</h2>
+    <div class="card storico">${
+      acquisti.length ? acquisti.map(a => `
+        <div class="r" data-aid="${a.id}">
+          <span class="d">${fmtData(a.date)}</span>
+          <span>${fmtEuro(a.price)}${a.weightKg?` · ${(a.weightKg*1000).toFixed(0)} g`:""}</span>
+          <span><strong>${fmtUnit(a.unitPrice, a.unitLabel)}</strong></span>
+          <span class="d" style="cursor:pointer" data-del="${a.id}" title="Elimina">✕</span>
+        </div>`).join("")
+      : `<div class="vuoto" style="padding:14px">Nessun acquisto registrato.</div>`
+    }</div>
+    <button class="btn" id="dt-prezzo">Registra prezzo</button>
+    <button class="btn secondario" id="dt-formato">Modifica formato</button>
+    <button class="btn pericolo" id="dt-elimina">Elimina prodotto</button>
+    ${p.formatHistory && p.formatHistory.length ? `<p class="nota">Formati precedenti: ${p.formatHistory.map(f => fmtFormato(f) + " (fino al " + fmtData(f.until) + ")").join(", ")}. Gli acquisti passati conservano il €/unità dell'epoca.</p>`:""}`);
+  velo.querySelector("[data-stelle]").addEventListener("click", async e => {
+    const v = e.target.dataset.v;
+    if(!v) return;
+    p.rating = parseInt(v,10);
+    await salvaProdotto(p);
+    await ricarica();
+    velo.querySelectorAll("[data-stelle] span").forEach(s =>
+      s.classList.toggle("piena", parseInt(s.dataset.v,10)<=p.rating));
+    toast("Gradimento aggiornato");
+  });
+  velo.querySelectorAll("[data-del]").forEach(x =>
+    x.addEventListener("click", async e => {
+      e.stopPropagation();
+      if(!confirm("Eliminare questo acquisto?")) return;
+      await eliminaAcquisto(x.dataset.del);
+      await ricarica();
+      modaleDettaglio(pid);
+    }));
+  velo.querySelector("#dt-prezzo").addEventListener("click", () => modalePrezzo(pid));
+  velo.querySelector("#dt-formato").addEventListener("click", () => modaleFormato(pid));
+  velo.querySelector("#dt-elimina").addEventListener("click", async () => {
+    if(!confirm(`Eliminare "${p.name}" e tutto il suo storico?`)) return;
+    for(const a of acquisti) await eliminaAcquisto(a.id);
+    await eliminaProdotto(pid);
+    await ricarica();
+    chiudiModale();
+    toast("Prodotto eliminato");
+    render();
+  });
+}
+
+function modaleFormato(pid){
+  const p = PRODOTTI.find(x => x.id===pid);
+  const velo = apriModale(`
+    <h3>Modifica formato</h3>
+    <div class="nota">Usalo quando la confezione cambia (es. da 100 g a 90 g). Lo storico resta onesto: i vecchi acquisti tengono il €/unità calcolato all'epoca.</div>
+    <label>Formato</label>
+    <select id="mf-mode">
+      <option value="conf" ${p.format.mode==="conf"?"selected":""}>Confezione fissa</option>
+      <option value="peso" ${p.format.mode==="peso"?"selected":""}>A peso (banco / sfuso)</option>
+    </select>
+    <div class="riga" id="mf-riga" style="margin-top:8px;${p.format.mode==="peso"?"display:none":""}">
+      <input id="mf-qty" type="number" inputmode="decimal" step="any" min="0" value="${p.format.qty||""}">
+      <select id="mf-unit">
+        ${["g","kg","ml","l","pz"].map(u => `<option value="${u}" ${p.format.unit===u?"selected":""}>${u}</option>`).join("")}
+      </select>
+    </div>
+    <button class="btn" id="mf-salva">Salva formato</button>`);
+  const mode = velo.querySelector("#mf-mode");
+  mode.addEventListener("change", () => {
+    velo.querySelector("#mf-riga").style.display = mode.value==="peso" ? "none" : "flex";
+  });
+  velo.querySelector("#mf-salva").addEventListener("click", async () => {
+    let nuovo;
+    if(mode.value==="peso") nuovo = {mode:"peso"};
+    else{
+      const qty = parseFloat((velo.querySelector("#mf-qty").value||"").replace(",","."));
+      if(!qty || qty<=0) return toast("Quantità non valida");
+      nuovo = {mode:"conf", qty, unit: velo.querySelector("#mf-unit").value};
+    }
+    if(JSON.stringify(nuovo)!==JSON.stringify(p.format)){
+      p.formatHistory = p.formatHistory || [];
+      p.formatHistory.push({...p.format, until: oggi()});
+      p.format = nuovo;
+      await salvaProdotto(p);
+      await ricarica();
+    }
+    chiudiModale();
+    modaleDettaglio(pid);
+  });
+}
+
+/* ================= TAB: Confronta ================= */
+function vistaConfronta(){
+  const gruppi = {};
+  for(const p of PRODOTTI){
+    const g = p.group || p.name;
+    (gruppi[g] = gruppi[g] || []).push(p);
+  }
+  const nomi = Object.keys(gruppi).sort((a,b) => a.localeCompare(b));
+  if(!nomi.length){
+    vista.innerHTML = `<div class="vuoto">Niente da confrontare ancora.<br>Crea schede prodotto con lo stesso <strong>gruppo</strong> in supermercati diversi.</div>`;
+    return;
+  }
+  vista.innerHTML = `<h2>Confronto per gruppo</h2>
+    <input id="cf-cerca" type="search" placeholder="Filtra gruppi…" autocomplete="off">
+    <div id="cf-lista" style="margin-top:10px"></div>`;
+  function disegna(filtro=""){
+    const box = $("#cf-lista");
+    const nf = normalizza(filtro);
+    const visibili = nomi.filter(n => !nf || normalizza(n).includes(nf));
+    box.innerHTML = visibili.map(nome => {
+      const righe = gruppi[nome].map(p => ({p, u: ultimoAcquisto(p.id)}));
+      // miglior prezzo solo tra unità confrontabili
+      const perUnita = {};
+      righe.forEach(r => { if(r.u) (perUnita[r.u.unitLabel] = perUnita[r.u.unitLabel] || []).push(r); });
+      const migliori = new Set();
+      for(const lab in perUnita){
+        if(perUnita[lab].length < 2) continue;
+        const min = Math.min(...perUnita[lab].map(r => r.u.unitPrice));
+        perUnita[lab].forEach(r => { if(r.u.unitPrice===min) migliori.add(r.p.id); });
+      }
+      righe.sort((a,b) => (a.u?a.u.unitPrice:Infinity) - (b.u?b.u.unitPrice:Infinity));
+      const labels = Object.keys(perUnita);
+      const misto = labels.length > 1;
+      return `<div class="card gruppo">
+        <div class="titolo"><span>${esc(nome)}</span><span class="n">${righe.length} ${righe.length===1?"scheda":"schede"}</span></div>
+        <div class="griglia-conf">${righe.map(({p,u}) => `
+          <div class="prod">
+            <div class="info">
+              <div class="nome">${esc(p.market)}</div>
+              <div class="meta"><span>${esc(p.name)}</span><span>${fmtFormato(p.format)}</span>${stelleHTML(p.rating,true)}</div>
+            </div>
+            ${u?`<div class="cartellino ${migliori.has(p.id)?"migliore":""}">
+              <span class="u">${fmtData(u.date)} · €/${u.unitLabel}</span>
+              <span class="v">${u.unitPrice.toFixed(2).replace(".",",")}</span>
+            </div>`:`<span class="badge-nuovo" style="background:var(--termico)">SENZA PREZZO</span>`}
+          </div>`).join("")}
+        </div>
+        ${misto?`<p class="nota">⚠ Unità diverse nel gruppo (${labels.join(", ")}): il confronto vale solo a parità di unità.</p>`:""}
+      </div>`;
+    }).join("") || `<div class="vuoto">Nessun gruppo corrisponde.</div>`;
+  }
+  $("#cf-cerca").addEventListener("input", e => disegna(e.target.value));
+  disegna();
+}
+
+/* ================= TAB: Altro ================= */
+function vistaAltro(){
+  const mercati = new Set(PRODOTTI.map(p => p.market));
+  vista.innerHTML = `
+    <h2>I tuoi dati</h2>
+    <div class="card">
+      <div class="storico">
+        <div class="r"><span class="d">Prodotti</span><span><strong>${PRODOTTI.length}</strong></span></div>
+        <div class="r"><span class="d">Prezzi registrati</span><span><strong>${ACQUISTI.length}</strong></span></div>
+        <div class="r"><span class="d">Supermercati</span><span><strong>${mercati.size}</strong></span></div>
+      </div>
+    </div>
+    <h2>Backup</h2>
+    <div class="card">
+      <p class="nota" style="margin-top:0">I dati vivono solo su questo dispositivo. Esporta un backup ogni tanto e importalo su un altro dispositivo per trasferire il catalogo.</p>
+      <button class="btn secondario" id="al-esporta">Esporta backup (JSON)</button>
+      <button class="btn secondario" id="al-importa">Importa backup</button>
+      <input id="al-file" type="file" accept="application/json,.json" hidden>
+    </div>
+    <p class="nota" style="text-align:center">Spesa v1 · funziona offline · i dati non lasciano mai il dispositivo</p>`;
+  $("#al-esporta").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify({v:1, esportato: new Date().toISOString(), prodotti: PRODOTTI, acquisti: ACQUISTI}, null, 1)], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "spesa-backup-" + oggi() + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $("#al-importa").addEventListener("click", () => $("#al-file").click());
+  $("#al-file").addEventListener("change", async e => {
+    const f = e.target.files[0];
+    if(!f) return;
+    try{
+      const dati = JSON.parse(await f.text());
+      if(!Array.isArray(dati.prodotti) || !Array.isArray(dati.acquisti)) throw new Error("formato");
+      const modo = confirm("OK = unisci al catalogo esistente\nAnnulla = sostituisci tutto");
+      if(!modo){
+        if(!confirm("Sicuro? Il catalogo attuale su questo dispositivo verrà cancellato.")) return;
+        for(const p of PRODOTTI) await eliminaProdotto(p.id);
+        for(const a of ACQUISTI) await eliminaAcquisto(a.id);
+      }
+      for(const p of dati.prodotti) await salvaProdotto(p);
+      for(const a of dati.acquisti) await salvaAcquisto(a);
+      await ricarica();
+      toast(`Importati ${dati.prodotti.length} prodotti, ${dati.acquisti.length} prezzi`);
+      render();
+    }catch(err){
+      toast("File non valido: serve un backup esportato da Spesa");
+    }
+    e.target.value = "";
+  });
+}
+
+/* ================= routing ================= */
+let tabAttiva = "spesa";
+function render(){
+  document.querySelectorAll("nav button").forEach(b =>
+    b.classList.toggle("attiva", b.dataset.tab===tabAttiva));
+  if(tabAttiva==="spesa") vistaSpesa();
+  else if(tabAttiva==="catalogo") vistaCatalogo();
+  else if(tabAttiva==="confronta") vistaConfronta();
+  else vistaAltro();
+}
+document.querySelectorAll("nav button").forEach(b =>
+  b.addEventListener("click", () => { tabAttiva = b.dataset.tab; chiudiModale(); render(); }));
+
+/* ================= avvio ================= */
+(async function(){
+  await apriDB();
+  await ricarica();
+  render();
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
