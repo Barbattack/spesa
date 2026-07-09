@@ -339,8 +339,17 @@ function cercaProdotti(query, limite=8){
 }
 
 /* ================= codice a barre + OpenFoodFacts ================= */
-const normEan = e => String(e||"").replace(/\D/g,"").replace(/^0+/,"");
+const soloCifre = e => String(e||"").replace(/\D/g,"");
+const normEan = e => soloCifre(e).replace(/^0+/,"");
 const prodottiPerEan = ean => PRODOTTI.filter(p => p.ean && normEan(p.ean)===normEan(ean));
+function codiceInterno(ean){
+  // RCN / codici a circolazione ristretta: univoci solo dentro la catena, inutili per OFF
+  const r = soloCifre(ean);
+  if(r.length===8 && (r[0]==="0" || r[0]==="2")) return true;  // RCN-8 (es. private label Lidl)
+  if(r.length===13 && r[0]==="2") return true;                  // EAN-13 prefissi 20-29 (peso variabile, interni)
+  if(r.length===12 && r[0]==="2") return true;                  // UPC-A number system 2 (random weight)
+  return false;
+}
 let streamAttivo = null;
 function fermaCamera(){
   if(streamAttivo){ streamAttivo.getTracks().forEach(t => t.stop()); streamAttivo = null; }
@@ -366,7 +375,7 @@ async function modaleScanner(onEan){
     </div>`);
   const stato = velo.querySelector("#sc-stato");
   velo.querySelector("#sc-vai").addEventListener("click", () => {
-    const e = normEan(velo.querySelector("#sc-manuale").value);
+    const e = soloCifre(velo.querySelector("#sc-manuale").value);
     if(e.length < 7) return toast("Codice troppo corto");
     fermaCamera(); chiudiModale(); gestisci(e);
   });
@@ -387,7 +396,7 @@ async function modaleScanner(onEan){
         const codes = await det.detect(video);
         if(codes.length){
           clearInterval(loop);
-          const ean = normEan(codes[0].rawValue);
+          const ean = soloCifre(codes[0].rawValue);
           fermaCamera(); chiudiModale();
           if(navigator.vibrate) navigator.vibrate(60);
           gestisci(ean);
@@ -439,6 +448,10 @@ function modaleScelteEan(prodotti){
     el.addEventListener("click", () => modalePrezzo(el.dataset.id)));
 }
 async function cercaOFF(ean){
+  if(codiceInterno(ean)){
+    toast("Codice interno della catena: scheda manuale, il codice resta associato");
+    return modaleNuovoProdotto("", {ean});
+  }
   toast("Codice nuovo, cerco su OpenFoodFacts…");
   let prefill = {ean};
   try{
@@ -861,6 +874,7 @@ function modaleDettaglio(pid){
       : `<div class="vuoto" style="padding:14px">Nessun acquisto registrato.</div>`
     }</div>
     <button class="btn" id="dt-prezzo">Registra prezzo</button>
+    <button class="btn secondario" id="dt-modifica">Modifica scheda (nome, gruppo)</button>
     <button class="btn secondario" id="dt-formato">Modifica formato</button>
     <button class="btn secondario" id="dt-ean">${p.ean?"Aggiorna":"Associa"} codice a barre</button>
     <button class="btn pericolo" id="dt-elimina">Elimina prodotto</button>
@@ -884,6 +898,7 @@ function modaleDettaglio(pid){
       modaleDettaglio(pid);
     }));
   velo.querySelector("#dt-prezzo").addEventListener("click", () => modalePrezzo(pid));
+  velo.querySelector("#dt-modifica").addEventListener("click", () => modaleModificaScheda(pid));
   velo.querySelector("#dt-formato").addEventListener("click", () => modaleFormato(pid));
   velo.querySelector("#dt-ean").addEventListener("click", () => {
     modaleScanner(async ean => {
@@ -904,6 +919,34 @@ function modaleDettaglio(pid){
     chiudiModale();
     toast("Prodotto eliminato");
     render();
+  });
+}
+
+function modaleModificaScheda(pid){
+  const p = PRODOTTI.find(x => x.id===pid);
+  const velo = apriModale(`
+    <h3>Modifica scheda</h3>
+    <label for="ms-nome">Nome</label>
+    <input id="ms-nome" value="${esc(p.name)}">
+    <label for="ms-gruppo">Gruppo di confronto</label>
+    <input id="ms-gruppo" list="dl-gruppi" value="${esc(p.group||"")}">
+    ${datalistGruppi()}
+    <label for="ms-market">Supermercato</label>
+    <input id="ms-market" list="dl-mercati" value="${esc(p.market)}">
+    ${datalistMercati()}
+    <button class="btn" id="ms-salva">Salva</button>`);
+  velo.querySelector("#ms-salva").addEventListener("click", async () => {
+    const name = velo.querySelector("#ms-nome").value.trim();
+    const market = velo.querySelector("#ms-market").value.trim();
+    if(!name || !market) return toast("Nome e supermercato sono obbligatori");
+    p.name = name;
+    p.group = velo.querySelector("#ms-gruppo").value.trim() || name;
+    p.market = market;
+    await salvaProdotto(p);
+    await ricarica();
+    chiudiModale();
+    toast("Scheda aggiornata");
+    modaleDettaglio(pid);
   });
 }
 
