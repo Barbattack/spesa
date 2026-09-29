@@ -50,3 +50,7 @@ Nota tecnica: quando aggiorni `index.html`, incrementa `CACHE` in `sw.js` (es. `
 - **Statistiche** (tab Altro): spesa per mese e per supermercato (di ciò che registri), e "paniere personale" — variazione mediana dei tuoi prezzi pieni su 60+ giorni, con i rincari maggiori. Si popola da solo col tempo.
 - Scorciatoia: pressione lunga sull'icona → "Scansiona".
 - Migrazione automatica del database (v1→v2): i dati esistenti restano.
+
+## Scrivimi
+
+Se usi qualcosa di questo repository — l'app, il codice o anche solo un'idea — scrivimi a [barbattack84@gmail.com](mailto:barbattack84@gmail.com): mi fa piacere saperlo. Basta una riga.

@@ -1116,6 +1116,10 @@ function vistaAltro(){
       <button class="btn secondario" id="al-importa">Importa backup</button>
       <input id="al-file" type="file" accept="application/json,.json" hidden>
     </div>
+    <h2>Scrivimi</h2>
+    <div class="card">
+      <p class="nota" style="margin:0">Se il cartellino giallo ti ha fatto cambiare supermercato almeno una volta, scrivimelo: <a href="mailto:barbattack84@gmail.com?subject=spesa">barbattack84@gmail.com</a></p>
+    </div>
     <p class="nota" style="text-align:center">Spesa v3 · funziona offline · i dati non lasciano mai il dispositivo</p>`;
   $("#al-esporta").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify({v:3, esportato: new Date().toISOString(), prodotti: PRODOTTI, acquisti: ACQUISTI, scontrini: SCONTRINI}, null, 1)], {type:"application/json"});
